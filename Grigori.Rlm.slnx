@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Grigori.Infrastructure/Grigori.Infrastructure.csproj" />
+    <Project Path="src/Grigori.Rlm.Mcp/Grigori.Rlm.Mcp.csproj" />
+  </Folder>
+</Solution>
