@@ -1,11 +1,90 @@
 """
 RLM Python Sandbox - Executes LLM-generated Python code with recursive call support.
 """
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, List, Tuple
 import traceback
 import io
 import sys
 import re
+import ast
+
+
+class CodeValidator(ast.NodeVisitor):
+    """
+    Validates Python code before execution by walking the AST.
+    Blocks dangerous patterns that could escape the sandbox.
+    """
+
+    BLOCKED_NAMES = frozenset({
+        '__import__', 'eval', 'exec', 'compile', 'open',
+        'input', 'breakpoint', 'globals', 'locals', 'vars',
+        'dir', 'type', 'object', 'getattr', 'setattr', 'delattr',
+        'hasattr', 'memoryview', 'bytearray', 'bytes',
+    })
+
+    BLOCKED_ATTRS = frozenset({
+        '__class__', '__bases__', '__mro__', '__subclasses__',
+        '__globals__', '__code__', '__builtins__', '__import__',
+        '__dict__', '__module__', '__self__', '__func__',
+        '__closure__', '__annotations__', '__kwdefaults__',
+        '__defaults__', '__qualname__', '__reduce__', '__reduce_ex__',
+    })
+
+    def __init__(self):
+        self.errors: List[str] = []
+
+    def visit_Import(self, node: ast.Import) -> None:
+        names = ', '.join(alias.name for alias in node.names)
+        self.errors.append(f"Import statements not allowed: import {names}")
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        self.errors.append(f"Import statements not allowed: from {node.module} import ...")
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if node.id in self.BLOCKED_NAMES:
+            self.errors.append(f"Blocked function: {node.id}")
+        elif node.id.startswith('__') and node.id.endswith('__'):
+            self.errors.append(f"Dunder names not allowed: {node.id}")
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr in self.BLOCKED_ATTRS:
+            self.errors.append(f"Blocked attribute: {node.attr}")
+        elif node.attr.startswith('__') and node.attr.endswith('__'):
+            self.errors.append(f"Dunder attributes not allowed: {node.attr}")
+        elif node.attr.startswith('_'):
+            self.errors.append(f"Private attributes not allowed: {node.attr}")
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        # Check for string-based getattr calls like getattr(x, '__class__')
+        if isinstance(node.func, ast.Name) and node.func.id in ('getattr', 'setattr', 'delattr', 'hasattr'):
+            if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
+                attr_name = node.args[1].value
+                if isinstance(attr_name, str) and (attr_name in self.BLOCKED_ATTRS or attr_name.startswith('_')):
+                    self.errors.append(f"Blocked dynamic attribute access: {attr_name}")
+        self.generic_visit(node)
+
+
+def validate_code(code: str) -> Tuple[bool, List[str]]:
+    """
+    Parse and validate code for security issues.
+
+    Args:
+        code: Python source code to validate
+
+    Returns:
+        Tuple of (is_valid, list of error messages)
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        return False, [f"Syntax error at line {e.lineno}: {e.msg}"]
+
+    validator = CodeValidator()
+    validator.visit(tree)
+
+    return len(validator.errors) == 0, validator.errors
 
 
 class RlmRepl:
@@ -76,12 +155,26 @@ class RlmRepl:
         Returns:
             Dict with 'result', 'output', 'error', and 'call_count'
         """
+        # Validate code before execution
+        is_valid, validation_errors = validate_code(code)
+        if not is_valid:
+            return {
+                "result": "",
+                "output": "",
+                "error": f"Code validation failed:\n" + "\n".join(f"  - {e}" for e in validation_errors),
+                "call_count": self._call_count
+            }
+
         # Capture stdout
         stdout_capture = io.StringIO()
         old_stdout = sys.stdout
 
         # Create execution namespace with REPL functions
+        # NOTE: __builtins__ is explicitly set to None to prevent access to dangerous functions
         namespace = {
+            # Block access to builtins entirely
+            "__builtins__": {},
+
             # Context and data
             "context": self.context,
 
@@ -94,7 +187,7 @@ class RlmRepl:
             # Result variable - LLM sets this
             "result": "",
 
-            # Safe builtins
+            # Safe builtins only - no getattr/hasattr/type/object
             "print": print,
             "len": len,
             "str": str,
@@ -120,9 +213,39 @@ class RlmRepl:
             "any": any,
             "all": all,
             "isinstance": isinstance,
-            "hasattr": hasattr,
-            "getattr": getattr,
+            "repr": repr,
+            "chr": chr,
+            "ord": ord,
+            "hex": hex,
+            "bin": bin,
+            "oct": oct,
+            "pow": pow,
+            "divmod": divmod,
+            "slice": slice,
+            "iter": iter,
+            "next": next,
+            "callable": callable,
+            "format": format,
+            "id": id,
+            "hash": hash,
+
+            # Safe modules
             "re": re,
+
+            # Exceptions (needed for try/except)
+            "Exception": Exception,
+            "ValueError": ValueError,
+            "TypeError": TypeError,
+            "KeyError": KeyError,
+            "IndexError": IndexError,
+            "AttributeError": AttributeError,
+            "StopIteration": StopIteration,
+            "RuntimeError": RuntimeError,
+
+            # Constants
+            "True": True,
+            "False": False,
+            "None": None,
         }
 
         error = None
