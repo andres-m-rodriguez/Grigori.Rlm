@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional, Callable
 import traceback
 import io
 import sys
+import re
 
 
 class RlmRepl:
@@ -57,8 +58,8 @@ class RlmRepl:
         """List all available context keys."""
         return list(self.context.keys())
 
-    def search_context(self, pattern: str) -> Dict[str, str]:
-        """Search context for keys/values containing pattern."""
+    def search_context(self, pattern: str, *args, **kwargs) -> Dict[str, str]:
+        """Search context for keys/values containing pattern. Extra args ignored for compatibility."""
         pattern_lower = pattern.lower()
         return {
             k: v for k, v in self.context.items()
@@ -121,6 +122,7 @@ class RlmRepl:
             "isinstance": isinstance,
             "hasattr": hasattr,
             "getattr": getattr,
+            "re": re,
         }
 
         error = None

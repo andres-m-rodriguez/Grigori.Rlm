@@ -1,6 +1,7 @@
 using Grigori.Infrastructure;
 using Grigori.Infrastructure.Orchestration;
 using Grigori.Infrastructure.Sandbox;
+using Grigori.Rlm.Mcp.Features.ClaudeExecute.Endpoints;
 using Grigori.Rlm.Mcp.Features.Explore.Endpoints;
 using Grigori.Rlm.Mcp.Features.Rlm.Endpoints;
 using ModelContextProtocol.Server;
@@ -16,6 +17,7 @@ if (!mcpMode) mcpHttpMode = true;
 builder.Services.AddGrigoriInfrastructure(builder.Configuration);
 
 // Register MCP tool endpoints
+builder.Services.AddScoped<ClaudeExecuteEndpoints>();
 builder.Services.AddScoped<ExploreEndpoints>();
 builder.Services.AddScoped<RlmEndpoints>();
 
